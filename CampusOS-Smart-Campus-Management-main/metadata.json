@@ -1,0 +1,6 @@
+{
+  "name": "Smart Campus — Facility & Maintenance Platform",
+  "description": "Enterprise university facility booking, concurrency-safe room scheduling, and campus maintenance management platform.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,31 @@
+# Dependencies & build artifacts
+node_modules
+dist
+dist-server
+coverage
+*.tsbuildinfo
+
+# Version control & editor artifacts
+.git
+.gitignore
+.aistudio
+.vscode
+.idea
+*.log
+.DS_Store
+
+# Environment files & credentials — NEVER bake into Docker images
+.env
+.env.*
+!.env.example
+firebase-applet-config.json
+*service-account*.json
+*firebase-adminsdk*.json
+*.pem
+*.key
+*.p12
+secrets/
+
+# Documentation & tests not required for production runtime
+*.md
+src/tests

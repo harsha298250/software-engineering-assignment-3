@@ -1,0 +1,239 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Campus user account synchronized from Firebase Authentication with server-governed RBAC role and PII isolation.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "integer", "description": "Numeric user identifier" },
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$", "description": "Firebase Auth UID" },
+        "fullName": { "type": "string", "minLength": 2, "maxLength": 100, "description": "User full name" },
+        "email": { "type": "string", "format": "email", "maxLength": 200, "description": "Institutional email address" },
+        "department": { "type": "string", "minLength": 2, "maxLength": 120, "description": "Academic department or operational unit" },
+        "role": { "type": "string", "enum": ["STUDENT", "FACULTY", "MAINTENANCE_STAFF", "ADMIN"], "description": "Authorized campus role" },
+        "accountStatus": { "type": "string", "enum": ["ACTIVE", "INACTIVE"], "description": "Account activation status" },
+        "avatarUrl": { "type": "string", "maxLength": 500, "description": "Optional profile avatar URL" },
+        "profileCompleted": { "type": "boolean", "description": "Whether profile setup is complete" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last update timestamp" }
+      },
+      "required": ["id", "uid", "fullName", "email", "department", "role", "accountStatus", "profileCompleted", "createdAt", "updatedAt"]
+    },
+    "AdminMarker": {
+      "title": "AdminMarker",
+      "description": "Trusted administrator membership marker keyed by Firebase Auth UID.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "integer" },
+        "grantedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "grantedAt"]
+    },
+    "BootstrapConfig": {
+      "title": "BootstrapConfig",
+      "description": "One-time workspace administrator bootstrap lock document.",
+      "type": "object",
+      "properties": {
+        "claimedByUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "claimedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["claimedByUid", "claimedAt"]
+    },
+    "Facility": {
+      "title": "Facility",
+      "description": "Campus room, laboratory, hall, or athletic venue available for scheduling and maintenance tracking.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "integer" },
+        "code": { "type": "string", "minLength": 3, "maxLength": 20, "pattern": "^[A-Z0-9\\-]+$" },
+        "name": { "type": "string", "minLength": 3, "maxLength": 120 },
+        "category": { "type": "string", "enum": ["Classrooms", "Computer Laboratories", "Seminar Halls", "Conference Rooms", "Auditoriums", "Meeting Rooms", "Sports Facilities", "Other Campus Resources"] },
+        "building": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "floor": { "type": "integer" },
+        "roomNumber": { "type": "string", "minLength": 1, "maxLength": 30 },
+        "capacity": { "type": "integer" },
+        "description": { "type": "string", "minLength": 10, "maxLength": 1500 },
+        "amenities": { "type": "array" },
+        "imageKey": { "type": "string", "enum": ["lecture_hall", "computer_lab", "auditorium", "sports_complex"] },
+        "operationalStatus": { "type": "string", "enum": ["OPERATIONAL", "UNDER_MAINTENANCE", "DISABLED"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "code", "name", "category", "building", "floor", "roomNumber", "capacity", "description", "amenities", "imageKey", "operationalStatus", "createdAt", "updatedAt"]
+    },
+    "Booking": {
+      "title": "Booking",
+      "description": "Campus room reservation request with concurrency-locked approval lifecycle.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "integer" },
+        "userId": { "type": "integer" },
+        "userUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "facilityId": { "type": "integer" },
+        "bookingDate": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "maxLength": 10 },
+        "startTime": { "type": "string", "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$", "maxLength": 5 },
+        "endTime": { "type": "string", "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$", "maxLength": 5 },
+        "purpose": { "type": "string", "minLength": 5, "maxLength": 250 },
+        "attendees": { "type": "integer" },
+        "remarks": { "type": "string", "maxLength": 500 },
+        "status": { "type": "string", "enum": ["PENDING", "APPROVED", "REJECTED", "CANCELLED", "COMPLETED"] },
+        "approvalRemarks": { "type": "string", "maxLength": 500 },
+        "approvedBy": { "type": "integer" },
+        "requesterName": { "type": "string", "maxLength": 100 },
+        "requesterRole": { "type": "string", "enum": ["STUDENT", "FACULTY", "MAINTENANCE_STAFF", "ADMIN"] },
+        "approverName": { "type": "string", "maxLength": 100 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "userUid", "facilityId", "bookingDate", "startTime", "endTime", "purpose", "attendees", "status", "createdAt", "updatedAt"]
+    },
+    "FacilityLock": {
+      "title": "FacilityLock",
+      "description": "Deterministic per-facility-per-date lock document holding approved time slots for atomic conflict checks.",
+      "type": "object",
+      "properties": {
+        "facilityId": { "type": "integer" },
+        "bookingDate": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "maxLength": 10 },
+        "approvedSlots": { "type": "array" },
+        "lastCancelledBookingId": { "type": "integer" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["facilityId", "bookingDate", "approvedSlots", "updatedAt"]
+    },
+    "MaintenanceRequest": {
+      "title": "MaintenanceRequest",
+      "description": "Campus maintenance issue report with technician assignment and resolution tracking.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "integer" },
+        "reportedBy": { "type": "integer" },
+        "reporterUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "facilityId": { "type": "integer" },
+        "title": { "type": "string", "minLength": 5, "maxLength": 160 },
+        "description": { "type": "string", "minLength": 10, "maxLength": 2000 },
+        "category": { "type": "string", "enum": ["Electrical", "Plumbing", "Air Conditioning", "Furniture", "Networking", "Computer Equipment", "Cleaning", "Infrastructure", "Other"] },
+        "priority": { "type": "string", "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"] },
+        "status": { "type": "string", "enum": ["OPEN", "ASSIGNED", "IN_PROGRESS", "RESOLVED", "CLOSED"] },
+        "assignedTo": { "type": "integer" },
+        "assigneeUid": { "type": "string", "maxLength": 128 },
+        "reporterName": { "type": "string", "maxLength": 100 },
+        "assigneeName": { "type": "string", "maxLength": 100 },
+        "resolutionRemarks": { "type": "string", "maxLength": 1000 },
+        "attachmentNote": { "type": "string", "maxLength": 300 },
+        "reportedDate": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "maxLength": 10 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "reportedBy", "reporterUid", "facilityId", "title", "description", "category", "priority", "status", "reportedDate", "createdAt", "updatedAt"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "In-app user notification for booking and maintenance state changes.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "integer" },
+        "userId": { "type": "integer" },
+        "userUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "message": { "type": "string", "minLength": 2, "maxLength": 600 },
+        "type": { "type": "string", "enum": ["BOOKING", "MAINTENANCE", "SYSTEM"] },
+        "isRead": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "userUid", "title", "message", "type", "isRead", "createdAt"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Immutable operational audit trail for administrative and workflow actions.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "integer" },
+        "actorId": { "type": "integer" },
+        "actorUid": { "type": "string", "maxLength": 128 },
+        "actorName": { "type": "string", "maxLength": 120 },
+        "action": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "entityType": { "type": "string", "minLength": 2, "maxLength": 40 },
+        "entityId": { "type": "integer" },
+        "details": { "type": "string", "maxLength": 500 },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "action", "entityType", "entityId", "timestamp"]
+    },
+    "Counter": {
+      "title": "Counter",
+      "description": "Internal atomic sequence generator for numeric entity IDs.",
+      "type": "object",
+      "properties": {
+        "nextId": { "type": "integer" }
+      },
+      "required": ["nextId"]
+    },
+    "RoleInvite": {
+      "title": "RoleInvite",
+      "description": "Admin-provisioned campus role invitation claimed atomically upon verified Google Sign-In.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "format": "email", "maxLength": 200 },
+        "fullName": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "department": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "role": { "type": "string", "enum": ["STUDENT", "FACULTY", "MAINTENANCE_STAFF", "ADMIN"] },
+        "status": { "type": "string", "enum": ["PENDING", "CLAIMED", "REVOKED"] },
+        "invitedBy": { "type": "integer" },
+        "invitedByName": { "type": "string", "maxLength": 100 },
+        "claimedByUid": { "type": "string", "maxLength": 128 },
+        "claimedAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "email", "fullName", "department", "role", "status", "invitedBy", "invitedByName", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Stores campus user profiles keyed by Firebase Auth UID (or seed UID)."
+    },
+    "/admins/{adminId}": {
+      "schema": { "$ref": "#/entities/AdminMarker" },
+      "description": "Stores trusted administrator UID markers for zero-trust rules enforcement."
+    },
+    "/config/{docId}": {
+      "schema": { "$ref": "#/entities/BootstrapConfig" },
+      "description": "Stores one-time workspace bootstrap claim document."
+    },
+    "/facilities/{facilityId}": {
+      "schema": { "$ref": "#/entities/Facility" },
+      "description": "Stores campus facilities and their operational availability."
+    },
+    "/bookings/{bookingId}": {
+      "schema": { "$ref": "#/entities/Booking" },
+      "description": "Stores room booking requests and approval metadata."
+    },
+    "/facility_locks/{lockId}": {
+      "schema": { "$ref": "#/entities/FacilityLock" },
+      "description": "Stores per-facility per-date approved time slot locks for concurrency control."
+    },
+    "/maintenance_requests/{requestId}": {
+      "schema": { "$ref": "#/entities/MaintenanceRequest" },
+      "description": "Stores campus maintenance tickets, assignments, and resolution notes."
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/Notification" },
+      "description": "Stores user-scoped in-app notifications."
+    },
+    "/audit_logs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Stores immutable system and administrative audit log entries."
+    },
+    "/counters/{counterId}": {
+      "schema": { "$ref": "#/entities/Counter" },
+      "description": "Stores server-managed sequential ID counters."
+    },
+    "/role_invites/{inviteId}": {
+      "schema": { "$ref": "#/entities/RoleInvite" },
+      "description": "Stores Admin-provisioned role invitations keyed by SHA-256 hash of normalized email."
+    }
+  }
+}

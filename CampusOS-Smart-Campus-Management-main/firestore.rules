@@ -1,0 +1,550 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Default-Deny Catch-All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ==================== GLOBAL HELPERS ====================
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'gabrieljason938@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function emailInviteId(email) {
+      return hashing.sha256(email.lower()).toHexString().lower();
+    }
+
+    // ==================== VALIDATION BLUEPRINTS ====================
+    function isValidUser(data) {
+      return data.keys().hasAll([
+        'id', 'uid', 'fullName', 'email', 'department', 'role', 'accountStatus', 'profileCompleted', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id', 'uid', 'fullName', 'email', 'department', 'role', 'accountStatus', 'avatarUrl', 'profileCompleted', 'createdAt', 'updatedAt'
+      ]) &&
+      data.id is int && data.id > 0 &&
+      data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.fullName is string && data.fullName.size() >= 2 && data.fullName.size() <= 100 &&
+      data.email is string && data.email.size() >= 3 && data.email.size() <= 200 &&
+      data.department is string && data.department.size() >= 2 && data.department.size() <= 120 &&
+      data.role in ['STUDENT', 'FACULTY', 'MAINTENANCE_STAFF', 'ADMIN'] &&
+      data.accountStatus in ['ACTIVE', 'INACTIVE'] &&
+      (!('avatarUrl' in data) || data.avatarUrl == null || (data.avatarUrl is string && data.avatarUrl.size() <= 500)) &&
+      data.profileCompleted is bool &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidAdminMarker(data) {
+      return data.keys().hasAll(['uid', 'grantedAt']) &&
+        data.keys().hasOnly(['uid', 'userId', 'grantedAt']) &&
+        data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid.matches('^[a-zA-Z0-9_\\-]+$') &&
+        (!('userId' in data) || (data.userId is int && data.userId > 0)) &&
+        data.grantedAt is timestamp;
+    }
+
+    function isValidBootstrapConfig(data) {
+      return data.keys().hasAll(['claimedByUid', 'claimedAt']) &&
+        data.keys().hasOnly(['claimedByUid', 'claimedAt']) &&
+        data.claimedByUid is string && data.claimedByUid.size() >= 1 && data.claimedByUid.size() <= 128 && data.claimedByUid.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.claimedAt is timestamp;
+    }
+
+    function isValidFacility(data) {
+      return data.keys().hasAll([
+        'id', 'code', 'name', 'category', 'building', 'floor', 'roomNumber', 'capacity', 'description', 'amenities', 'imageKey', 'operationalStatus', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id', 'code', 'name', 'category', 'building', 'floor', 'roomNumber', 'capacity', 'description', 'amenities', 'imageKey', 'operationalStatus', 'createdAt', 'updatedAt'
+      ]) &&
+      data.id is int && data.id > 0 &&
+      data.code is string && data.code.size() >= 3 && data.code.size() <= 20 && data.code.matches('^[A-Z0-9\\-]+$') &&
+      data.name is string && data.name.size() >= 3 && data.name.size() <= 120 &&
+      data.category in [
+        'Classrooms', 'Computer Laboratories', 'Seminar Halls', 'Conference Rooms',
+        'Auditoriums', 'Meeting Rooms', 'Sports Facilities', 'Other Campus Resources'
+      ] &&
+      data.building is string && data.building.size() >= 2 && data.building.size() <= 100 &&
+      data.floor is int && data.floor >= -2 && data.floor <= 50 &&
+      data.roomNumber is string && data.roomNumber.size() >= 1 && data.roomNumber.size() <= 30 &&
+      data.capacity is int && data.capacity >= 1 && data.capacity <= 5000 &&
+      data.description is string && data.description.size() >= 10 && data.description.size() <= 1500 &&
+      data.amenities is list && data.amenities.size() <= 30 && (data.amenities.size() == 0 || data.amenities[0] is string) &&
+      data.imageKey in ['lecture_hall', 'computer_lab', 'auditorium', 'sports_complex'] &&
+      data.operationalStatus in ['OPERATIONAL', 'UNDER_MAINTENANCE', 'DISABLED'] &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidBooking(data) {
+      return data.keys().hasAll([
+        'id', 'userId', 'userUid', 'facilityId', 'bookingDate', 'startTime', 'endTime', 'purpose', 'attendees', 'status', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id', 'userId', 'userUid', 'facilityId', 'bookingDate', 'startTime', 'endTime', 'purpose', 'attendees', 'remarks', 'status', 'approvalRemarks', 'approvedBy', 'requesterName', 'requesterRole', 'approverName', 'createdAt', 'updatedAt'
+      ]) &&
+      data.id is int && data.id > 0 &&
+      data.userId is int && data.userId > 0 &&
+      data.userUid is string && data.userUid.size() >= 1 && data.userUid.size() <= 128 && data.userUid.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.facilityId is int && data.facilityId > 0 &&
+      data.bookingDate is string && data.bookingDate.size() == 10 && data.bookingDate.matches('^\\d{4}-\\d{2}-\\d{2}$') &&
+      data.startTime is string && data.startTime.size() == 5 && data.startTime.matches('^([01]\\d|2[0-3]):[0-5]\\d$') &&
+      data.endTime is string && data.endTime.size() == 5 && data.endTime.matches('^([01]\\d|2[0-3]):[0-5]\\d$') &&
+      data.startTime < data.endTime &&
+      data.purpose is string && data.purpose.size() >= 5 && data.purpose.size() <= 250 &&
+      data.attendees is int && data.attendees >= 1 && data.attendees <= 5000 &&
+      (!('remarks' in data) || data.remarks == null || (data.remarks is string && data.remarks.size() <= 500)) &&
+      data.status in ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED', 'COMPLETED'] &&
+      (!('approvalRemarks' in data) || data.approvalRemarks == null || (data.approvalRemarks is string && data.approvalRemarks.size() <= 500)) &&
+      (!('approvedBy' in data) || data.approvedBy == null || (data.approvedBy is int && data.approvedBy > 0)) &&
+      (!('requesterName' in data) || data.requesterName == null || (data.requesterName is string && data.requesterName.size() <= 100)) &&
+      (!('requesterRole' in data) || data.requesterRole == null || data.requesterRole in ['STUDENT', 'FACULTY', 'MAINTENANCE_STAFF', 'ADMIN']) &&
+      (!('approverName' in data) || data.approverName == null || (data.approverName is string && data.approverName.size() <= 100)) &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidFacilityLock(data) {
+      return data.keys().hasAll(['facilityId', 'bookingDate', 'approvedSlots', 'updatedAt']) &&
+        data.keys().hasOnly(['facilityId', 'bookingDate', 'approvedSlots', 'lastCancelledBookingId', 'updatedAt']) &&
+        data.facilityId is int && data.facilityId > 0 &&
+        data.bookingDate is string && data.bookingDate.size() == 10 && data.bookingDate.matches('^\\d{4}-\\d{2}-\\d{2}$') &&
+        data.approvedSlots is list && data.approvedSlots.size() <= 200 &&
+        (data.approvedSlots.size() == 0 || data.approvedSlots[0] is map) &&
+        (!('lastCancelledBookingId' in data) || data.lastCancelledBookingId == null || (data.lastCancelledBookingId is int && data.lastCancelledBookingId > 0)) &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidMaintenance(data) {
+      return data.keys().hasAll([
+        'id', 'reportedBy', 'reporterUid', 'facilityId', 'title', 'description', 'category', 'priority', 'status', 'reportedDate', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id', 'reportedBy', 'reporterUid', 'facilityId', 'title', 'description', 'category', 'priority', 'status', 'assignedTo', 'assigneeUid', 'reporterName', 'assigneeName', 'resolutionRemarks', 'attachmentNote', 'reportedDate', 'createdAt', 'updatedAt'
+      ]) &&
+      data.id is int && data.id > 0 &&
+      data.reportedBy is int && data.reportedBy > 0 &&
+      data.reporterUid is string && data.reporterUid.size() >= 1 && data.reporterUid.size() <= 128 && data.reporterUid.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.facilityId is int && data.facilityId > 0 &&
+      data.title is string && data.title.size() >= 5 && data.title.size() <= 160 &&
+      data.description is string && data.description.size() >= 10 && data.description.size() <= 2000 &&
+      data.category in [
+        'Electrical', 'Plumbing', 'Air Conditioning', 'Furniture',
+        'Networking', 'Computer Equipment', 'Cleaning', 'Infrastructure', 'Other'
+      ] &&
+      data.priority in ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] &&
+      data.status in ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'] &&
+      (!('assignedTo' in data) || data.assignedTo == null || (data.assignedTo is int && data.assignedTo > 0)) &&
+      (!('assigneeUid' in data) || data.assigneeUid == null || (data.assigneeUid is string && data.assigneeUid.size() <= 128)) &&
+      (!('reporterName' in data) || data.reporterName == null || (data.reporterName is string && data.reporterName.size() <= 100)) &&
+      (!('assigneeName' in data) || data.assigneeName == null || (data.assigneeName is string && data.assigneeName.size() <= 100)) &&
+      (!('resolutionRemarks' in data) || data.resolutionRemarks == null || (data.resolutionRemarks is string && data.resolutionRemarks.size() <= 1000)) &&
+      (!('attachmentNote' in data) || data.attachmentNote == null || (data.attachmentNote is string && data.attachmentNote.size() <= 300)) &&
+      data.reportedDate is string && data.reportedDate.size() == 10 && data.reportedDate.matches('^\\d{4}-\\d{2}-\\d{2}$') &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidNotification(data) {
+      return data.keys().hasAll(['id', 'userId', 'userUid', 'title', 'message', 'type', 'isRead', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'userId', 'userUid', 'title', 'message', 'type', 'isRead', 'createdAt']) &&
+        data.id is int && data.id > 0 &&
+        data.userId is int && data.userId > 0 &&
+        data.userUid is string && data.userUid.size() >= 1 && data.userUid.size() <= 128 && data.userUid.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.title is string && data.title.size() >= 2 && data.title.size() <= 160 &&
+        data.message is string && data.message.size() >= 2 && data.message.size() <= 600 &&
+        data.type in ['BOOKING', 'MAINTENANCE', 'SYSTEM'] &&
+        data.isRead is bool &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidAuditLog(data) {
+      return data.keys().hasAll(['id', 'action', 'entityType', 'entityId', 'timestamp']) &&
+        data.keys().hasOnly(['id', 'actorId', 'actorUid', 'actorName', 'action', 'entityType', 'entityId', 'details', 'timestamp']) &&
+        data.id is int && data.id > 0 &&
+        (!('actorId' in data) || data.actorId == null || (data.actorId is int && data.actorId > 0)) &&
+        (!('actorUid' in data) || data.actorUid == null || (data.actorUid is string && data.actorUid.size() <= 128)) &&
+        (!('actorName' in data) || data.actorName == null || (data.actorName is string && data.actorName.size() <= 120)) &&
+        data.action is string && data.action.size() >= 2 && data.action.size() <= 80 &&
+        data.entityType is string && data.entityType.size() >= 2 && data.entityType.size() <= 40 &&
+        data.entityId is int && data.entityId >= 0 &&
+        (!('details' in data) || data.details == null || (data.details is string && data.details.size() <= 500)) &&
+        data.timestamp is timestamp;
+    }
+
+    function isValidCounter(data) {
+      return data.keys().hasAll(['nextId']) &&
+        data.keys().hasOnly(['nextId']) &&
+        data.nextId is int && data.nextId > 0;
+    }
+
+    function isValidRoleInvite(data) {
+      return data.keys().hasAll([
+        'id', 'email', 'fullName', 'department', 'role', 'status', 'invitedBy', 'invitedByName', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id', 'email', 'fullName', 'department', 'role', 'status', 'invitedBy', 'invitedByName', 'claimedByUid', 'claimedAt', 'createdAt', 'updatedAt'
+      ]) &&
+      isValidId(data.id) &&
+      data.email is string && data.email.size() >= 3 && data.email.size() <= 200 &&
+      data.fullName is string && data.fullName.size() >= 2 && data.fullName.size() <= 100 &&
+      data.department is string && data.department.size() >= 2 && data.department.size() <= 120 &&
+      data.role in ['STUDENT', 'FACULTY', 'MAINTENANCE_STAFF', 'ADMIN'] &&
+      data.status in ['PENDING', 'CLAIMED', 'REVOKED'] &&
+      data.invitedBy is int && data.invitedBy > 0 &&
+      data.invitedByName is string && data.invitedByName.size() >= 2 && data.invitedByName.size() <= 100 &&
+      (!('claimedByUid' in data) || data.claimedByUid == null || isValidId(data.claimedByUid)) &&
+      (!('claimedAt' in data) || data.claimedAt == null || data.claimedAt is timestamp) &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    // ==================== COLLECTION RULES ====================
+
+    // 1. Users (PII isolated to owner or Admin; public cannot self-assign ADMIN/MAINTENANCE_STAFF)
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+
+      allow create: if isValidId(userId) &&
+        isValidUser(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (
+            isOwner(userId) &&
+            incoming().uid == request.auth.uid &&
+            incoming().email == request.auth.token.email &&
+            incoming().accountStatus == 'ACTIVE' &&
+            (
+              incoming().role in ['STUDENT', 'FACULTY'] ||
+              (
+                incoming().role == 'ADMIN' &&
+                existsAfter(/databases/$(database)/documents/admins/$(request.auth.uid))
+              ) ||
+              (
+                exists(/databases/$(database)/documents/role_invites/$(emailInviteId(request.auth.token.email))) &&
+                get(/databases/$(database)/documents/role_invites/$(emailInviteId(request.auth.token.email))).data.status == 'PENDING' &&
+                get(/databases/$(database)/documents/role_invites/$(emailInviteId(request.auth.token.email))).data.role == incoming().role &&
+                getAfter(/databases/$(database)/documents/role_invites/$(emailInviteId(request.auth.token.email))).data.status == 'CLAIMED'
+              )
+            )
+          )
+        );
+
+      allow update: if isValidId(userId) &&
+        isValidUser(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().uid == existing().uid &&
+        incoming().email == existing().email &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (
+            isOwner(userId) &&
+            incoming().accountStatus == existing().accountStatus &&
+            (
+              (incoming().role == existing().role &&
+               incoming().diff(existing()).affectedKeys().hasOnly(['fullName', 'department', 'avatarUrl', 'profileCompleted', 'updatedAt'])) ||
+              (existing().role in ['STUDENT', 'FACULTY'] &&
+               incoming().role in ['STUDENT', 'FACULTY'] &&
+               incoming().diff(existing()).affectedKeys().hasOnly(['fullName', 'department', 'role', 'avatarUrl', 'profileCompleted', 'updatedAt']))
+            )
+          )
+        );
+
+      allow delete: if false;
+    }
+
+    // 2. Admin Markers (No PII; allows first workspace owner atomic bootstrap claim)
+    match /admins/{adminId} {
+      allow get: if isValidId(adminId) && isSignedIn();
+      allow list: if isSignedIn() && (request.query.limit == null || request.query.limit <= 100);
+      allow create: if isValidId(adminId) &&
+        isValidAdminMarker(incoming()) &&
+        incoming().grantedAt == request.time &&
+        (
+          isAdmin() ||
+          (
+            isOwner(adminId) &&
+            incoming().uid == request.auth.uid &&
+            (
+              (
+                !exists(/databases/$(database)/documents/config/bootstrap) &&
+                existsAfter(/databases/$(database)/documents/config/bootstrap)
+              ) ||
+              (
+                exists(/databases/$(database)/documents/role_invites/$(emailInviteId(request.auth.token.email))) &&
+                get(/databases/$(database)/documents/role_invites/$(emailInviteId(request.auth.token.email))).data.status == 'PENDING' &&
+                get(/databases/$(database)/documents/role_invites/$(emailInviteId(request.auth.token.email))).data.role == 'ADMIN' &&
+                getAfter(/databases/$(database)/documents/role_invites/$(emailInviteId(request.auth.token.email))).data.status == 'CLAIMED'
+              )
+            )
+          )
+        );
+      allow update, delete: if isValidId(adminId) && isAdmin();
+    }
+
+    // 3. One-Time Workspace Bootstrap Lock
+    match /config/{docId} {
+      allow get: if isValidId(docId) && isSignedIn();
+      allow list: if false;
+      allow create: if isValidId(docId) &&
+        docId == 'bootstrap' &&
+        isSignedIn() &&
+        isValidBootstrapConfig(incoming()) &&
+        !exists(/databases/$(database)/documents/config/bootstrap) &&
+        incoming().claimedByUid == request.auth.uid &&
+        incoming().claimedAt == request.time;
+      allow update, delete: if false;
+    }
+
+    // 4. Facilities (Non-PII campus catalog readable for landing overview; write strictly Admin)
+    match /facilities/{facilityId} {
+      allow get: if isValidId(facilityId);
+      allow list: if request.query.limit == null || request.query.limit <= 500;
+      allow create: if isValidId(facilityId) && isAdmin() && isValidFacility(incoming()) &&
+        incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isValidId(facilityId) && isAdmin() && isValidFacility(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time;
+      allow delete: if isValidId(facilityId) && isAdmin();
+    }
+
+    // 5. Bookings (Creator owns PENDING request; only Admin approves/rejects)
+    match /bookings/{bookingId} {
+      allow get: if isValidId(bookingId) && isSignedIn() && (resource.data.userUid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userUid == request.auth.uid || isAdmin());
+
+      allow create: if isValidId(bookingId) &&
+        isSignedIn() &&
+        isValidBooking(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (
+            incoming().userUid == request.auth.uid &&
+            incoming().status == 'PENDING' &&
+            (!('approvedBy' in incoming()) || incoming().approvedBy == null) &&
+            (!('approvalRemarks' in incoming()) || incoming().approvalRemarks == null) &&
+            exists(/databases/$(database)/documents/facilities/$(string(incoming().facilityId))) &&
+            get(/databases/$(database)/documents/facilities/$(string(incoming().facilityId))).data.operationalStatus == 'OPERATIONAL' &&
+            incoming().attendees <= get(/databases/$(database)/documents/facilities/$(string(incoming().facilityId))).data.capacity
+          )
+        );
+
+      allow update: if isValidId(bookingId) &&
+        isSignedIn() &&
+        isValidBooking(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().userId == existing().userId &&
+        incoming().userUid == existing().userUid &&
+        incoming().facilityId == existing().facilityId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (
+            existing().userUid == request.auth.uid &&
+            existing().status in ['PENDING', 'APPROVED'] &&
+            incoming().status == 'CANCELLED' &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'approvalRemarks', 'updatedAt'])
+          )
+        );
+
+      allow delete: if isValidId(bookingId) && isAdmin();
+    }
+
+    // 6. Facility Locks (Non-PII approved slot intervals; write Admin or atomic owner cancel)
+    match /facility_locks/{lockId} {
+      allow get: if isValidId(lockId);
+      allow list: if request.query.limit == null || request.query.limit <= 500;
+      allow create: if isValidId(lockId) &&
+        isAdmin() &&
+        isValidFacilityLock(incoming()) &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(lockId) &&
+        isValidFacilityLock(incoming()) &&
+        incoming().facilityId == existing().facilityId &&
+        incoming().bookingDate == existing().bookingDate &&
+        incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (
+            isSignedIn() &&
+            incoming().lastCancelledBookingId is int &&
+            incoming().approvedSlots.size() < existing().approvedSlots.size() &&
+            get(/databases/$(database)/documents/bookings/$(string(incoming().lastCancelledBookingId))).data.userUid == request.auth.uid &&
+            getAfter(/databases/$(database)/documents/bookings/$(string(incoming().lastCancelledBookingId))).data.status == 'CANCELLED'
+          )
+        );
+      allow delete: if isValidId(lockId) && isAdmin();
+    }
+
+    // 7. Maintenance Requests (Tiered identity updates; terminal CLOSED locked for non-Admin)
+    match /maintenance_requests/{requestId} {
+      allow get: if isValidId(requestId) && isSignedIn() && (
+        resource.data.reporterUid == request.auth.uid ||
+        resource.data.assigneeUid == request.auth.uid ||
+        isAdmin()
+      );
+      allow list: if isSignedIn() && (
+        resource.data.reporterUid == request.auth.uid ||
+        resource.data.assigneeUid == request.auth.uid ||
+        isAdmin()
+      );
+
+      allow create: if isValidId(requestId) &&
+        isSignedIn() &&
+        isValidMaintenance(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (
+            incoming().reporterUid == request.auth.uid &&
+            incoming().status == 'OPEN' &&
+            (!('assignedTo' in incoming()) || incoming().assignedTo == null) &&
+            (!('assigneeUid' in incoming()) || incoming().assigneeUid == null) &&
+            exists(/databases/$(database)/documents/facilities/$(string(incoming().facilityId)))
+          )
+        );
+
+      allow update: if isValidId(requestId) &&
+        isSignedIn() &&
+        isValidMaintenance(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().reportedBy == existing().reportedBy &&
+        incoming().reporterUid == existing().reporterUid &&
+        incoming().facilityId == existing().facilityId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (
+            existing().status != 'CLOSED' &&
+            existing().assigneeUid == request.auth.uid &&
+            incoming().status in ['IN_PROGRESS', 'RESOLVED'] &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'resolutionRemarks', 'updatedAt'])
+          )
+        );
+
+      allow delete: if isValidId(requestId) && isAdmin();
+    }
+
+    // 8. Notifications (Owner can read and mark isRead; owner/Admin can create workflow alerts)
+    match /notifications/{notificationId} {
+      allow get: if isValidId(notificationId) && isSignedIn() && (resource.data.userUid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userUid == request.auth.uid || isAdmin());
+      allow create: if isValidId(notificationId) &&
+        isSignedIn() &&
+        isValidNotification(incoming()) &&
+        incoming().createdAt == request.time &&
+        (
+          isAdmin() ||
+          incoming().userUid == request.auth.uid ||
+          exists(/databases/$(database)/documents/admins/$(incoming().userUid))
+        );
+      allow update: if isValidId(notificationId) &&
+        isSignedIn() &&
+        isValidNotification(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().userId == existing().userId &&
+        incoming().userUid == existing().userUid &&
+        incoming().createdAt == existing().createdAt &&
+        (
+          isAdmin() ||
+          (
+            existing().userUid == request.auth.uid &&
+            incoming().isRead == true &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['isRead'])
+          )
+        );
+      allow delete: if isValidId(notificationId) && isAdmin();
+    }
+
+    // 9. Audit Logs (Append-only by verified actor/Admin; readable strictly by Admin)
+    match /audit_logs/{logId} {
+      allow get: if isValidId(logId) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isValidId(logId) &&
+        isSignedIn() &&
+        isValidAuditLog(incoming()) &&
+        incoming().timestamp == request.time &&
+        (isAdmin() || incoming().actorUid == request.auth.uid);
+      allow update, delete: if false;
+    }
+
+    // 10. Atomic Sequential ID Counters (Single-doc get/create/update only; no list/delete)
+    match /counters/{counterId} {
+      allow get: if isValidId(counterId) && isSignedIn();
+      allow list: if false;
+      allow create, update: if isValidId(counterId) &&
+        isSignedIn() &&
+        isValidCounter(incoming());
+      allow delete: if false;
+    }
+
+    // 11. Admin-Provisioned Role Invitations (Admin full control; matching verified user can get & claim own PENDING invite)
+    match /role_invites/{inviteId} {
+      allow get: if isValidId(inviteId) && (
+        isAdmin() ||
+        (isSignedIn() && inviteId == emailInviteId(request.auth.token.email))
+      );
+      allow list: if isAdmin();
+      allow create: if isValidId(inviteId) &&
+        isAdmin() &&
+        isValidRoleInvite(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(inviteId) &&
+        isValidRoleInvite(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().email == existing().email &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (
+            isSignedIn() &&
+            inviteId == emailInviteId(request.auth.token.email) &&
+            existing().status == 'PENDING' &&
+            incoming().status == 'CLAIMED' &&
+            incoming().claimedByUid == request.auth.uid &&
+            incoming().claimedAt == request.time &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'claimedByUid', 'claimedAt', 'updatedAt'])
+          )
+        );
+      allow delete: if isValidId(inviteId) && isAdmin();
+    }
+  }
+}
